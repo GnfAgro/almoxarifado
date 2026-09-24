@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { supabase } from '../supabaseClient'
 
 const TABELAS = {
-  categoria: { tabela: 'categorias', rotulo: 'Categoria' },
-  tipo: { tabela: 'tipos', rotulo: 'Tipo' },
-  funcao: { tabela: 'funcoes', rotulo: 'Função' },
+  categoria: { tabela: 'categorias', rotulo: 'Categoria', plural: 'Categorias' },
+  tipo: { tabela: 'tipos', rotulo: 'Tipo', plural: 'Tipos' },
+  funcao: { tabela: 'funcoes', rotulo: 'Função', plural: 'Funções' },
 }
 
 export default function GerenciarCatalogo({ categorias, tipos, funcoes, aoAtualizar }) {
@@ -50,7 +50,7 @@ export default function GerenciarCatalogo({ categorias, tipos, funcoes, aoAtuali
             className={aba === chave ? 'ativa' : ''}
             onClick={() => { setAba(chave); setErro('') }}
           >
-            {info.rotulo}s
+            {info.plural}
           </button>
         ))}
       </div>
