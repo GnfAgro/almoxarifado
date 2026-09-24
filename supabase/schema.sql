@@ -143,9 +143,10 @@ create policy "almoxarife ve proprias requisicoes" on public.requisicoes
   for select using (
     almoxarife_id = auth.uid() or public.get_my_role() = 'admin'
   );
+-- só o almoxarife cria requisições; o admin só aprova/rejeita
 create policy "almoxarife cria requisicoes" on public.requisicoes
   for insert with check (
-    public.get_my_role() in ('almoxarife', 'admin')
+    public.get_my_role() = 'almoxarife'
     and almoxarife_id = auth.uid()
   );
 create policy "admin atualiza requisicoes" on public.requisicoes

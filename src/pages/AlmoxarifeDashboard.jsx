@@ -127,7 +127,7 @@ export default function AlmoxarifeDashboard({ souAdmin = false }) {
         )}
       </div>
 
-      {!modo && (
+      {!modo && !(souAdmin && aba === 'requisicoes') && (
         <button
           className="botao botao-primario fab"
           onClick={() => setModo(aba === 'requisicoes' ? 'nova-req' : 'novo-item')}
