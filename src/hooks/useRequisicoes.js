@@ -3,18 +3,19 @@ import { supabase } from '../supabaseClient'
 
 export function useRequisicoes() {
   const [requisicoes, setRequisicoes] = useState([])
+  const [mapaPerfis, setMapaPerfis] = useState({})
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
 
   const recarregar = useCallback(async () => {
     setCarregando(true)
-    const { data, error } = await supabase
-      .from('requisicoes')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (error) setErro(error.message)
-    else setErro('')
-    setRequisicoes(data || [])
+    const [resReq, resPerfis] = await Promise.all([
+      supabase.from('requisicoes').select('*').order('created_at', { ascending: false }),
+      supabase.from('profiles').select('id, nome'),
+    ])
+    setErro(resReq.error ? resReq.error.message : '')
+    setRequisicoes(resReq.data || [])
+    setMapaPerfis(Object.fromEntries((resPerfis.data || []).map((p) => [p.id, p.nome])))
     setCarregando(false)
   }, [])
 
@@ -22,5 +23,5 @@ export function useRequisicoes() {
     recarregar()
   }, [recarregar])
 
-  return { requisicoes, carregando, erro, recarregar }
+  return { requisicoes, mapaPerfis, carregando, erro, recarregar }
 }

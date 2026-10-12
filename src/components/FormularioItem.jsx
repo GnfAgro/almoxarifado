@@ -3,21 +3,40 @@ import { supabase } from '../supabaseClient'
 
 const VAZIO = {
   nome: '', apelidosTexto: '', categoria_id: '', tipo_id: '', funcao_id: '',
-  codigo: '', unidade: '', quantidade: 0, quantidade_minima: 0,
-  nota_fiscal: '', data_compra: '', loja: '',
+  codigo: '', unidade: '', quantidade_minima: 0,
 }
 
 export default function FormularioItem({ categorias, tipos, funcoes, itemEditando, aoSalvar, aoCancelar }) {
   const [dados, setDados] = useState(
     itemEditando
-      ? { ...VAZIO, ...itemEditando, apelidosTexto: (itemEditando.apelidos || []).join(', ') }
+      ? {
+          nome: itemEditando.nome,
+          apelidosTexto: (itemEditando.apelidos || []).join(', '),
+          categoria_id: itemEditando.categoria_id,
+          tipo_id: itemEditando.tipo_id,
+          funcao_id: itemEditando.funcao_id || '',
+          codigo: itemEditando.codigo || '',
+          unidade: itemEditando.unidade,
+          quantidade_minima: itemEditando.quantidade_minima,
+        }
       : VAZIO
   )
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
 
+  const tiposDaCategoria = tipos.filter((t) => t.categoria_id === dados.categoria_id)
+  const funcoesDoTipo = funcoes.filter((f) => f.tipo_id === dados.tipo_id)
+
   function set(campo, valor) {
     setDados((d) => ({ ...d, [campo]: valor }))
+  }
+
+  function mudarCategoria(id) {
+    setDados((d) => ({ ...d, categoria_id: id, tipo_id: '', funcao_id: '' }))
+  }
+
+  function mudarTipo(id) {
+    setDados((d) => ({ ...d, tipo_id: id, funcao_id: '' }))
   }
 
   async function aoSubmeter(e) {
@@ -39,13 +58,11 @@ export default function FormularioItem({ categorias, tipos, funcoes, itemEditand
       funcao_id: dados.funcao_id || null,
       codigo: dados.codigo || null,
       unidade: dados.unidade,
-      quantidade: Number(dados.quantidade) || 0,
       quantidade_minima: Number(dados.quantidade_minima) || 0,
-      nota_fiscal: dados.nota_fiscal || null,
-      data_compra: dados.data_compra || null,
-      loja: dados.loja || null,
+      updated_at: new Date().toISOString(),
     }
 
+    // Item novo nasce com estoque zero: a quantidade só entra via "Entrada de material".
     const resultado = itemEditando
       ? await supabase.from('itens').update(payload).eq('id', itemEditando.id)
       : await supabase.from('itens').insert(payload)
@@ -78,7 +95,7 @@ export default function FormularioItem({ categorias, tipos, funcoes, itemEditand
 
       <div className="campo">
         <label>Categoria *</label>
-        <select value={dados.categoria_id} onChange={(e) => set('categoria_id', e.target.value)} required>
+        <select value={dados.categoria_id} onChange={(e) => mudarCategoria(e.target.value)} required>
           <option value="">Selecione…</option>
           {categorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
         </select>
@@ -86,17 +103,31 @@ export default function FormularioItem({ categorias, tipos, funcoes, itemEditand
 
       <div className="campo">
         <label>Tipo *</label>
-        <select value={dados.tipo_id} onChange={(e) => set('tipo_id', e.target.value)} required>
-          <option value="">Selecione…</option>
-          {tipos.map((t) => <option key={t.id} value={t.id}>{t.nome}</option>)}
+        <select
+          value={dados.tipo_id}
+          onChange={(e) => mudarTipo(e.target.value)}
+          disabled={!dados.categoria_id}
+          required
+        >
+          <option value="">{dados.categoria_id ? 'Selecione…' : 'Escolha a categoria primeiro'}</option>
+          {tiposDaCategoria.map((t) => <option key={t.id} value={t.id}>{t.nome}</option>)}
         </select>
+        {dados.categoria_id && tiposDaCategoria.length === 0 && (
+          <div style={{ fontSize: 12, color: 'var(--cor-alerta)', marginTop: 4 }}>
+            Essa categoria ainda não tem tipos. Cadastre na aba Cadastros.
+          </div>
+        )}
       </div>
 
       <div className="campo">
         <label>Função (opcional)</label>
-        <select value={dados.funcao_id} onChange={(e) => set('funcao_id', e.target.value)}>
-          <option value="">Nenhuma</option>
-          {funcoes.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+        <select
+          value={dados.funcao_id}
+          onChange={(e) => set('funcao_id', e.target.value)}
+          disabled={!dados.tipo_id}
+        >
+          <option value="">{dados.tipo_id ? 'Nenhuma' : 'Escolha o tipo primeiro'}</option>
+          {funcoesDoTipo.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
         </select>
       </div>
 
@@ -105,41 +136,27 @@ export default function FormularioItem({ categorias, tipos, funcoes, itemEditand
         <input value={dados.codigo} onChange={(e) => set('codigo', e.target.value)} />
       </div>
 
-      <div className="campo">
-        <label>Unidade de medida *</label>
-        <input
-          value={dados.unidade}
-          onChange={(e) => set('unidade', e.target.value)}
-          placeholder="peça, litro, caixa, metro…"
-          required
-        />
-      </div>
-
       <div style={{ display: 'flex', gap: 10 }}>
         <div className="campo" style={{ flex: 1 }}>
-          <label>Quantidade em estoque</label>
-          <input type="number" min="0" value={dados.quantidade} onChange={(e) => set('quantidade', e.target.value)} />
+          <label>Unidade de medida *</label>
+          <input
+            value={dados.unidade}
+            onChange={(e) => set('unidade', e.target.value)}
+            placeholder="peça, litro, caixa…"
+            required
+          />
         </div>
         <div className="campo" style={{ flex: 1 }}>
-          <label>Estoque mínimo</label>
-          <input type="number" min="0" value={dados.quantidade_minima} onChange={(e) => set('quantidade_minima', e.target.value)} />
+          <label>Estoque mínimo (alerta)</label>
+          <input type="number" min="0" step="any" value={dados.quantidade_minima} onChange={(e) => set('quantidade_minima', e.target.value)} />
         </div>
       </div>
 
-      <div className="campo">
-        <label>Nota fiscal (visível só p/ almoxarife e admin)</label>
-        <input value={dados.nota_fiscal} onChange={(e) => set('nota_fiscal', e.target.value)} />
-      </div>
-      <div style={{ display: 'flex', gap: 10 }}>
-        <div className="campo" style={{ flex: 1 }}>
-          <label>Data da compra</label>
-          <input type="date" value={dados.data_compra || ''} onChange={(e) => set('data_compra', e.target.value)} />
+      {!itemEditando && (
+        <div style={{ fontSize: 12.5, color: 'var(--cor-tinta-suave)', marginBottom: 12 }}>
+          O item começa com estoque zero. Para adicionar quantidade, use “Dar entrada” no cartão do item (com nota fiscal e fornecedor).
         </div>
-        <div className="campo" style={{ flex: 1 }}>
-          <label>Loja / fornecedor</label>
-          <input value={dados.loja} onChange={(e) => set('loja', e.target.value)} />
-        </div>
-      </div>
+      )}
 
       <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
         <button type="button" className="botao botao-fantasma" onClick={aoCancelar}>Cancelar</button>

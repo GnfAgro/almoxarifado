@@ -4,7 +4,7 @@ import ListaEstoque from '../components/ListaEstoque'
 
 export default function Estoque() {
   const { itens, categorias, tipos, mapaCategorias, mapaTipos, mapaFuncoes, carregando, erro } =
-    useCatalogo(false)
+    useCatalogo()
 
   return (
     <div className="app-shell">
@@ -29,7 +29,6 @@ export default function Estoque() {
             mapaCategorias={mapaCategorias}
             mapaTipos={mapaTipos}
             mapaFuncoes={mapaFuncoes}
-            podeVerOculto={false}
           />
         )}
       </div>

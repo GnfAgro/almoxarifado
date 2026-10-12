@@ -1,21 +1,37 @@
 import { useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { useAuth } from '../context/AuthContext'
+import { hojeISO } from '../utils/datas'
 
-const TIPOS = [
-  { valor: 'saida', rotulo: 'Saída de material' },
+// Almoxarife: só PEDE ao admin (entrada, compra, empréstimo).
+const TIPOS_ALMOXARIFE = [
   { valor: 'entrada', rotulo: 'Entrada de material' },
   { valor: 'compra', rotulo: 'Compra' },
+  { valor: 'emprestimo', rotulo: 'Empréstimo' },
+]
+// Admin: registra direto (entrada e baixa), sem precisar de aprovação.
+const TIPOS_ADMIN = [
+  { valor: 'entrada', rotulo: 'Entrada de material' },
+  { valor: 'saida', rotulo: 'Baixa de material (saída)' },
 ]
 
-export default function FormularioRequisicao({ itens, aoSalvar, aoCancelar }) {
+export default function FormularioRequisicao({ itens, souAdmin, itemInicialId = '', tipoInicial, aoSalvar, aoCancelar }) {
   const { perfil } = useAuth()
-  const [itemId, setItemId] = useState('')
+  const tipos = souAdmin ? TIPOS_ADMIN : TIPOS_ALMOXARIFE
+
+  const [tipo, setTipo] = useState(tipoInicial || tipos[0].valor)
+  const [itemId, setItemId] = useState(itemInicialId)
   const [quantidade, setQuantidade] = useState('')
-  const [tipo, setTipo] = useState('saida')
-  const [urgente, setUrgente] = useState(false)
-  const [funcionarioNome, setFuncionarioNome] = useState('')
   const [observacao, setObservacao] = useState('')
+  // entrada
+  const [fornecedor, setFornecedor] = useState('')
+  const [notaFiscal, setNotaFiscal] = useState('')
+  const [dataRecebimento, setDataRecebimento] = useState(hojeISO())
+  const [receita, setReceita] = useState('') // '' | 'sim' | 'nao'
+  // empréstimo / baixa
+  const [servidor, setServidor] = useState('')
+  const [vencimento, setVencimento] = useState('')
+
   const [erro, setErro] = useState('')
   const [enviando, setEnviando] = useState(false)
 
@@ -23,81 +39,96 @@ export default function FormularioRequisicao({ itens, aoSalvar, aoCancelar }) {
     e.preventDefault()
     setErro('')
 
-    if (!itemId || !quantidade || Number(quantidade) <= 0) {
-      setErro('Selecione o item e uma quantidade válida.')
-      return
+    const qtd = Number(quantidade)
+    const item = itens.find((i) => i.id === itemId)
+    if (!item) return setErro('Selecione o item.')
+    if (!qtd || qtd <= 0) return setErro('Informe uma quantidade válida.')
+
+    if (tipo === 'entrada') {
+      if (!fornecedor.trim()) return setErro('Informe o nome do fornecedor.')
+      if (!notaFiscal.trim()) return setErro('Informe o número da nota fiscal.')
+      if (!dataRecebimento) return setErro('Informe a data de recebimento.')
+      if (!receita) return setErro('Informe se tem receita agronômica (sim ou não).')
     }
-    if (tipo === 'saida' && !funcionarioNome.trim()) {
-      setErro('Informe o nome do funcionário que está retirando o material.')
-      return
+    if (tipo === 'emprestimo' || tipo === 'saida') {
+      if (!servidor.trim()) {
+        return setErro(
+          tipo === 'emprestimo'
+            ? 'Informe o nome do servidor que está pegando emprestado.'
+            : 'Informe o nome do servidor que está retirando o material.'
+        )
+      }
+      if (qtd > Number(item.quantidade)) {
+        return setErro(`Só há ${item.quantidade} ${item.unidade} disponível em estoque.`)
+      }
+    }
+    if (tipo === 'emprestimo' && !vencimento) {
+      return setErro('Informe a data de vencimento (devolução).')
     }
 
     setEnviando(true)
-    const ehUrgente = tipo === 'saida' && urgente
+    let resultado
 
-    const payloadBase = {
-      item_id: itemId,
-      quantidade: Number(quantidade),
-      tipo,
-      urgente: ehUrgente,
-      funcionario_nome: tipo === 'saida' ? funcionarioNome.trim() : null,
-      almoxarife_id: perfil.id,
-      observacao: observacao || null,
-    }
-
-    if (ehUrgente) {
-      // Saída de urgência: desconta o estoque na hora, sob responsabilidade do almoxarife,
-      // sem esperar aprovação do admin (mas fica registrado e marcado como urgente).
-      const item = itens.find((i) => i.id === itemId)
-      if (!item) {
-        setErro('Item não encontrado.')
-        setEnviando(false)
-        return
-      }
-      const novaQuantidade = Number(item.quantidade) - Number(quantidade)
-      if (novaQuantidade < 0) {
-        setErro('Quantidade maior do que o disponível em estoque.')
-        setEnviando(false)
-        return
-      }
-
-      const { error: erroItem } = await supabase
-        .from('itens')
-        .update({ quantidade: novaQuantidade })
-        .eq('id', itemId)
-      if (erroItem) {
-        setErro(erroItem.message)
-        setEnviando(false)
-        return
-      }
-
-      const { error: erroReq } = await supabase.from('requisicoes').insert({
-        ...payloadBase,
-        status: 'executado_urgente',
-        resolved_at: new Date().toISOString(),
-      })
-      setEnviando(false)
-      if (erroReq) { setErro(erroReq.message); return }
+    if (souAdmin) {
+      resultado =
+        tipo === 'entrada'
+          ? await supabase.rpc('registrar_entrada', {
+              p_item: itemId,
+              p_qtd: qtd,
+              p_fornecedor: fornecedor.trim(),
+              p_nf: notaFiscal.trim(),
+              p_data: dataRecebimento,
+              p_receita: receita === 'sim',
+              p_obs: observacao.trim() || null,
+            })
+          : await supabase.rpc('registrar_saida', {
+              p_item: itemId,
+              p_qtd: qtd,
+              p_servidor: servidor.trim(),
+              p_obs: observacao.trim() || null,
+            })
     } else {
-      const { error } = await supabase.from('requisicoes').insert({
-        ...payloadBase,
+      const payload = {
+        item_id: itemId,
+        quantidade: qtd,
+        tipo,
         status: 'pendente',
-      })
-      setEnviando(false)
-      if (error) { setErro(error.message); return }
+        almoxarife_id: perfil.id,
+        observacao: observacao.trim() || null,
+      }
+      if (tipo === 'entrada') {
+        payload.fornecedor = fornecedor.trim()
+        payload.nota_fiscal = notaFiscal.trim()
+        payload.data_recebimento = dataRecebimento
+        payload.receita_agronomica = receita === 'sim'
+      }
+      if (tipo === 'emprestimo') {
+        payload.servidor_nome = servidor.trim()
+        payload.data_vencimento = vencimento
+      }
+      resultado = await supabase.from('requisicoes').insert(payload)
     }
 
+    setEnviando(false)
+    if (resultado.error) {
+      setErro(resultado.error.message)
+      return
+    }
     aoSalvar()
   }
+
+  const rotuloBotao = souAdmin
+    ? tipo === 'entrada' ? 'Registrar entrada' : 'Registrar baixa'
+    : 'Enviar requisição ao admin'
 
   return (
     <form onSubmit={aoSubmeter}>
       {erro && <div className="erro">{erro}</div>}
 
       <div className="campo">
-        <label>Tipo de requisição</label>
-        <select value={tipo} onChange={(e) => { setTipo(e.target.value); setUrgente(false) }}>
-          {TIPOS.map((t) => <option key={t.valor} value={t.valor}>{t.rotulo}</option>)}
+        <label>Tipo</label>
+        <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
+          {tipos.map((t) => <option key={t.valor} value={t.valor}>{t.rotulo}</option>)}
         </select>
       </div>
 
@@ -107,7 +138,7 @@ export default function FormularioRequisicao({ itens, aoSalvar, aoCancelar }) {
           <option value="">Selecione o item…</option>
           {itens.map((i) => (
             <option key={i.id} value={i.id}>
-              {i.nome} {i.codigo ? `(${i.codigo})` : ''} — {i.quantidade} {i.unidade} em estoque
+              {i.nome}{i.codigo ? ` (${i.codigo})` : ''} — {i.quantidade} {i.unidade} disponível
             </option>
           ))}
         </select>
@@ -115,39 +146,61 @@ export default function FormularioRequisicao({ itens, aoSalvar, aoCancelar }) {
 
       <div className="campo">
         <label>Quantidade</label>
-        <input type="number" min="1" value={quantidade} onChange={(e) => setQuantidade(e.target.value)} required />
+        <input type="number" min="0" step="any" value={quantidade} onChange={(e) => setQuantidade(e.target.value)} required />
       </div>
 
-      {tipo === 'saida' && (
+      {tipo === 'entrada' && (
+        <>
+          <div className="campo">
+            <label>Fornecedor *</label>
+            <input value={fornecedor} onChange={(e) => setFornecedor(e.target.value)} />
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div className="campo" style={{ flex: 1 }}>
+              <label>Nota fiscal (nº) *</label>
+              <input value={notaFiscal} onChange={(e) => setNotaFiscal(e.target.value)} />
+            </div>
+            <div className="campo" style={{ flex: 1 }}>
+              <label>Data de recebimento *</label>
+              <input type="date" value={dataRecebimento} onChange={(e) => setDataRecebimento(e.target.value)} />
+            </div>
+          </div>
+          <div className="campo">
+            <label>Tem receita agronômica? *</label>
+            <select value={receita} onChange={(e) => setReceita(e.target.value)}>
+              <option value="">Selecione…</option>
+              <option value="sim">Sim</option>
+              <option value="nao">Não</option>
+            </select>
+          </div>
+        </>
+      )}
+
+      {(tipo === 'emprestimo' || tipo === 'saida') && (
         <div className="campo">
-          <label>Funcionário que está retirando</label>
-          <input value={funcionarioNome} onChange={(e) => setFuncionarioNome(e.target.value)} required />
+          <label>
+            {tipo === 'emprestimo' ? 'Servidor que está pegando emprestado *' : 'Servidor que está retirando *'}
+          </label>
+          <input value={servidor} onChange={(e) => setServidor(e.target.value)} />
         </div>
       )}
 
-      {tipo === 'saida' && (
-        <div className="campo campo-check">
-          <input
-            type="checkbox"
-            id="urgente"
-            checked={urgente}
-            onChange={(e) => setUrgente(e.target.checked)}
-          />
-          <label htmlFor="urgente" style={{ margin: 0 }}>
-            Saída de urgência — sai do estoque agora, sob minha responsabilidade, sem esperar aprovação
-          </label>
+      {tipo === 'emprestimo' && (
+        <div className="campo">
+          <label>Data de vencimento (devolução) *</label>
+          <input type="date" min={hojeISO()} value={vencimento} onChange={(e) => setVencimento(e.target.value)} />
         </div>
       )}
 
       <div className="campo">
-        <label>Observação (opcional)</label>
+        <label>{tipo === 'emprestimo' ? 'Comentário (opcional)' : 'Observação (opcional)'}</label>
         <textarea rows={2} value={observacao} onChange={(e) => setObservacao(e.target.value)} />
       </div>
 
       <div style={{ display: 'flex', gap: 10 }}>
         <button type="button" className="botao botao-fantasma" onClick={aoCancelar}>Cancelar</button>
-        <button className={`botao botao-bloco ${urgente ? 'botao-alerta' : 'botao-primario'}`} disabled={enviando}>
-          {enviando ? 'Enviando…' : urgente ? 'Confirmar saída de urgência' : 'Enviar requisição'}
+        <button className="botao botao-primario botao-bloco" disabled={enviando}>
+          {enviando ? 'Enviando…' : rotuloBotao}
         </button>
       </div>
     </form>

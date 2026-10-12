@@ -1,8 +1,6 @@
-import { useState } from 'react'
-
-export default function EtiquetaItem({ item, categoriaNome, tipoNome, funcaoNome, podeVerOculto, acoes }) {
-  const [mostrarOculto, setMostrarOculto] = useState(false)
+export default function EtiquetaItem({ item, categoriaNome, tipoNome, funcaoNome, acoes }) {
   const abaixoMinimo = Number(item.quantidade) <= Number(item.quantidade_minima)
+  const emprestado = Number(item.quantidade_emprestada || 0)
 
   return (
     <div className={`etiqueta ${abaixoMinimo ? 'abaixo-minimo' : ''}`}>
@@ -20,23 +18,10 @@ export default function EtiquetaItem({ item, categoriaNome, tipoNome, funcaoNome
 
         <div className="etiqueta-qtd">
           <span className="num">{item.quantidade}</span>
-          <span className="unidade">{item.unidade}</span>
+          <span className="unidade">{item.unidade} disponível</span>
+          {emprestado > 0 && <span className="emprestado">{emprestado} emprestado</span>}
           {abaixoMinimo && <span className="aviso">Estoque baixo</span>}
         </div>
-
-        {podeVerOculto && (item.nota_fiscal || item.data_compra || item.loja) && (
-          <div className="etiqueta-oculta">
-            {mostrarOculto ? (
-              <>
-                {item.nota_fiscal && <div>Nota fiscal: {item.nota_fiscal}</div>}
-                {item.data_compra && <div>Comprado em: {item.data_compra}</div>}
-                {item.loja && <div>Loja/fornecedor: {item.loja}</div>}
-              </>
-            ) : (
-              <button onClick={() => setMostrarOculto(true)}>Ver dados de compra</button>
-            )}
-          </div>
-        )}
 
         {acoes}
       </div>

@@ -1,41 +1,49 @@
 import { useState } from 'react'
 import { supabase } from '../supabaseClient'
 
-const TABELAS = {
-  categoria: { tabela: 'categorias', rotulo: 'Categoria', plural: 'Categorias' },
-  tipo: { tabela: 'tipos', rotulo: 'Tipo', plural: 'Tipos' },
-  funcao: { tabela: 'funcoes', rotulo: 'Função', plural: 'Funções' },
+function NovoNome({ placeholder, aoAdicionar }) {
+  const [valor, setValor] = useState('')
+  const [enviando, setEnviando] = useState(false)
+
+  async function enviar(e) {
+    e.preventDefault()
+    if (!valor.trim()) return
+    setEnviando(true)
+    const ok = await aoAdicionar(valor.trim())
+    setEnviando(false)
+    if (ok) setValor('')
+  }
+
+  return (
+    <form className="novo-nome" onSubmit={enviar}>
+      <input placeholder={placeholder} value={valor} onChange={(e) => setValor(e.target.value)} />
+      <button className="botao botao-primario" disabled={enviando}>+</button>
+    </form>
+  )
 }
 
 export default function GerenciarCatalogo({ categorias, tipos, funcoes, aoAtualizar }) {
-  const [aba, setAba] = useState('categoria')
-  const [nomeNovo, setNomeNovo] = useState('')
-  const [erro, setErro] = useState('')
-  const [enviando, setEnviando] = useState(false)
+  const [abertas, setAbertas] = useState({})
 
-  const listas = { categoria: categorias, tipo: tipos, funcao: funcoes }
-  const { tabela, rotulo } = TABELAS[aba]
-
-  async function adicionar(e) {
-    e.preventDefault()
-    if (!nomeNovo.trim()) return
-    setEnviando(true)
-    setErro('')
-    const { error } = await supabase.from(tabela).insert({ nome: nomeNovo.trim() })
-    setEnviando(false)
-    if (error) {
-      setErro(error.message.includes('duplicate') ? 'Esse nome já existe.' : error.message)
-      return
-    }
-    setNomeNovo('')
-    aoAtualizar()
+  function alternar(id) {
+    setAbertas((a) => ({ ...a, [id]: !a[id] }))
   }
 
-  async function remover(id) {
-    if (!confirm(`Remover este ${rotulo.toLowerCase()}? Isso só funciona se nenhum item estiver usando ele.`)) return
+  async function adicionar(tabela, payload) {
+    const { error } = await supabase.from(tabela).insert(payload)
+    if (error) {
+      alert(error.message.includes('duplicate') ? 'Esse nome já existe aqui.' : error.message)
+      return false
+    }
+    aoAtualizar()
+    return true
+  }
+
+  async function remover(tabela, id, aviso) {
+    if (!confirm(aviso)) return
     const { error } = await supabase.from(tabela).delete().eq('id', id)
     if (error) {
-      alert('Não foi possível remover — provavelmente existe item usando esse valor.')
+      alert('Não foi possível remover: existem itens cadastrados usando isso.')
       return
     }
     aoAtualizar()
@@ -43,40 +51,94 @@ export default function GerenciarCatalogo({ categorias, tipos, funcoes, aoAtuali
 
   return (
     <div>
-      <div className="abas-secundarias">
-        {Object.entries(TABELAS).map(([chave, info]) => (
-          <button
-            key={chave}
-            className={aba === chave ? 'ativa' : ''}
-            onClick={() => { setAba(chave); setErro('') }}
-          >
-            {info.plural}
-          </button>
-        ))}
+      <div style={{ fontSize: 13, color: 'var(--cor-tinta-suave)', marginBottom: 12 }}>
+        Cada categoria tem seus próprios tipos, e cada tipo tem suas próprias funções.
       </div>
 
-      {erro && <div className="erro">{erro}</div>}
+      <NovoNome
+        placeholder="Nova categoria…"
+        aoAdicionar={(nome) => adicionar('categorias', { nome })}
+      />
 
-      <form onSubmit={adicionar} style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <input
-          style={{ flex: 1, padding: '10px 11px', border: '1px solid var(--cor-borda-forte)', borderRadius: 4 }}
-          placeholder={`Nova ${rotulo.toLowerCase()}…`}
-          value={nomeNovo}
-          onChange={(e) => setNomeNovo(e.target.value)}
-        />
-        <button className="botao botao-primario" disabled={enviando}>Adicionar</button>
-      </form>
+      {categorias.length === 0 && <div className="vazio">Nenhuma categoria cadastrada.</div>}
 
-      {listas[aba].length === 0 && <div className="vazio">Nenhuma {rotulo.toLowerCase()} cadastrada.</div>}
+      {categorias.map((cat) => {
+        const tiposCat = tipos.filter((t) => t.categoria_id === cat.id)
+        const aberta = !!abertas[cat.id]
+        return (
+          <div className="arvore-cat" key={cat.id}>
+            <div className="arvore-cab" onClick={() => alternar(cat.id)}>
+              <div>
+                <strong>{cat.nome}</strong>
+                <span className="arvore-contagem">
+                  {tiposCat.length} {tiposCat.length === 1 ? 'tipo' : 'tipos'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  className="arvore-remover"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    remover('categorias', cat.id, `Remover a categoria "${cat.nome}" e todos os tipos e funções dela?`)
+                  }}
+                >
+                  Remover
+                </button>
+                <span>{aberta ? '▾' : '▸'}</span>
+              </div>
+            </div>
 
-      {listas[aba].map((item) => (
-        <div key={item.id} className="req" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>{item.nome}</span>
-          <button className="botao botao-fantasma" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => remover(item.id)}>
-            Remover
-          </button>
-        </div>
-      ))}
+            {aberta && (
+              <div className="arvore-corpo">
+                {tiposCat.length === 0 && (
+                  <div style={{ fontSize: 13, color: 'var(--cor-tinta-suave)', marginBottom: 8 }}>
+                    Nenhum tipo nesta categoria ainda.
+                  </div>
+                )}
+
+                {tiposCat.map((tipo) => {
+                  const funcoesTipo = funcoes.filter((f) => f.tipo_id === tipo.id)
+                  return (
+                    <div className="arvore-tipo" key={tipo.id}>
+                      <div className="arvore-linha">
+                        <span className="arvore-tipo-nome">{tipo.nome}</span>
+                        <button
+                          className="arvore-remover"
+                          onClick={() => remover('tipos', tipo.id, `Remover o tipo "${tipo.nome}" e as funções dele?`)}
+                        >
+                          Remover
+                        </button>
+                      </div>
+                      <div className="arvore-funcoes">
+                        {funcoesTipo.map((f) => (
+                          <span className="chip" key={f.id}>
+                            {f.nome}
+                            <button
+                              aria-label={`Remover ${f.nome}`}
+                              onClick={() => remover('funcoes', f.id, `Remover a função "${f.nome}"?`)}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <NovoNome
+                        placeholder="Nova função neste tipo…"
+                        aoAdicionar={(nome) => adicionar('funcoes', { nome, tipo_id: tipo.id })}
+                      />
+                    </div>
+                  )
+                })}
+
+                <NovoNome
+                  placeholder="Novo tipo nesta categoria…"
+                  aoAdicionar={(nome) => adicionar('tipos', { nome, categoria_id: cat.id })}
+                />
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

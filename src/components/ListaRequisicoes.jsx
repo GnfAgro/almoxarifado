@@ -1,61 +1,64 @@
-import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
+import { diasAte, formatarData } from '../utils/datas'
 
-const ROTULO_TIPO = { entrada: 'Entrada', saida: 'Saída', compra: 'Compra' }
-const ROTULO_STATUS = {
-  pendente: 'Pendente',
-  aprovado: 'Aprovado',
-  rejeitado: 'Rejeitado',
-  executado_urgente: 'Urgência executada',
+const ROTULO_TIPO = {
+  entrada: 'Entrada',
+  saida: 'Baixa (saída)',
+  compra: 'Compra',
+  emprestimo: 'Empréstimo',
 }
 
-export default function ListaRequisicoes({ requisicoes, itens, mapaItens, souAdmin, aoAtualizar }) {
-  const { perfil } = useAuth()
+// Só o admin exclui, e só o que já foi finalizado (nunca pendentes nem empréstimos em aberto)
+function podeExcluir(req) {
+  return (
+    req.status === 'rejeitado' ||
+    req.status === 'devolvido' ||
+    (req.status === 'aprovado' && req.tipo !== 'emprestimo')
+  )
+}
 
-  async function decidir(req, aprovar) {
-    if (aprovar) {
-      const item = itens.find((i) => i.id === req.item_id)
-      if (item) {
-        let novaQuantidade = Number(item.quantidade)
-        if (req.tipo === 'entrada') novaQuantidade += Number(req.quantidade)
-        if (req.tipo === 'saida') novaQuantidade -= Number(req.quantidade)
-        // 'compra' não mexe em estoque agora — só entra quando o material chegar (entrada)
+function infoStatus(req) {
+  if (req.tipo === 'emprestimo' && req.status === 'aprovado') {
+    return diasAte(req.data_vencimento) < 0
+      ? { rotulo: 'Atrasado', classe: 'rejeitado' }
+      : { rotulo: 'Emprestado', classe: 'aprovado' }
+  }
+  if (req.status === 'devolvido') return { rotulo: 'Devolvido', classe: 'aprovado' }
+  if (req.status === 'aprovado') return { rotulo: 'Aprovado', classe: 'aprovado' }
+  if (req.status === 'rejeitado') return { rotulo: 'Rejeitado', classe: 'rejeitado' }
+  return { rotulo: 'Pendente', classe: '' }
+}
 
-        if (novaQuantidade < 0) {
-          alert('Não é possível aprovar: quantidade em estoque ficaria negativa.')
-          return
-        }
-        if (req.tipo !== 'compra') {
-          const { error: erroItem } = await supabase
-            .from('itens')
-            .update({ quantidade: novaQuantidade })
-            .eq('id', item.id)
-          if (erroItem) { alert(erroItem.message); return }
-        }
-      }
+export default function ListaRequisicoes({ requisicoes, mapaItens, mapaPerfis, souAdmin, aoAtualizar, vazioTexto }) {
+  async function chamar(funcao, args) {
+    const { error } = await supabase.rpc(funcao, args)
+    if (error) {
+      alert(error.message)
+      return
     }
+    aoAtualizar()
+  }
 
-    const { error } = await supabase
-      .from('requisicoes')
-      .update({
-        status: aprovar ? 'aprovado' : 'rejeitado',
-        admin_id: perfil.id,
-        resolved_at: new Date().toISOString(),
-      })
-      .eq('id', req.id)
-
-    if (error) { alert(error.message); return }
+  async function excluir(req) {
+    if (!confirm('Excluir este registro do histórico? Isso não altera o estoque.')) return
+    const { error } = await supabase.from('requisicoes').delete().eq('id', req.id)
+    if (error) {
+      alert(error.message)
+      return
+    }
     aoAtualizar()
   }
 
   if (requisicoes.length === 0) {
-    return <div className="vazio">Nenhuma requisição por aqui.</div>
+    return <div className="vazio">{vazioTexto || 'Nenhuma requisição por aqui.'}</div>
   }
 
   return (
     <div>
       {requisicoes.map((req) => {
         const item = mapaItens[req.item_id]
+        const status = infoStatus(req)
+        const emAberto = req.tipo === 'emprestimo' && req.status === 'aprovado'
         return (
           <div className="req" key={req.id}>
             <div className="req-topo">
@@ -65,32 +68,61 @@ export default function ListaRequisicoes({ requisicoes, itens, mapaItens, souAdm
                   {item ? item.nome : 'Item removido'} — {req.quantidade} {item?.unidade || ''}
                 </div>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
-                {req.urgente && <span className="selo-urgente">URGÊNCIA</span>}
-                <span className={`selo-status ${req.status === 'aprovado' || req.status === 'executado_urgente' ? 'aprovado' : req.status === 'rejeitado' ? 'rejeitado' : ''}`}>
-                  {ROTULO_STATUS[req.status]}
-                </span>
-              </div>
+              <span className={`selo-status ${status.classe}`}>{status.rotulo}</span>
             </div>
 
-            {req.funcionario_nome && (
-              <div style={{ fontSize: 13, color: 'var(--cor-tinta-suave)', marginTop: 6 }}>
-                Retirado por: {req.funcionario_nome}
-              </div>
-            )}
-            {req.observacao && (
-              <div style={{ fontSize: 13, color: 'var(--cor-tinta-suave)', marginTop: 2 }}>
-                Obs: {req.observacao}
-              </div>
-            )}
-            <div style={{ fontSize: 12, color: 'var(--cor-tinta-suave)', marginTop: 4 }}>
+            <div className="req-detalhes">
+              {req.servidor_nome && (
+                <div>
+                  {req.tipo === 'emprestimo' ? 'Servidor que pegou emprestado' : 'Servidor que retirou'}: {req.servidor_nome}
+                </div>
+              )}
+              {req.tipo === 'emprestimo' && req.data_vencimento && (
+                <div>Devolver até: {formatarData(req.data_vencimento)}</div>
+              )}
+              {req.devolvido_em && <div>Devolvido em: {formatarData(req.devolvido_em)}</div>}
+              {req.tipo === 'entrada' && (
+                <>
+                  <div>Fornecedor: {req.fornecedor}</div>
+                  <div>Nota fiscal: {req.nota_fiscal} · Recebido em {formatarData(req.data_recebimento)}</div>
+                  <div>Receita agronômica: {req.receita_agronomica ? 'Sim' : 'Não'}</div>
+                </>
+              )}
+              {req.observacao && <div>Obs: {req.observacao}</div>}
+            </div>
+
+            <div className="req-meta">
+              {req.almoxarife_id && <>Solicitado por {mapaPerfis[req.almoxarife_id] || '—'} · </>}
+              {req.admin_id && (
+                <>{req.almoxarife_id ? 'Decidido' : 'Registrado'} por {mapaPerfis[req.admin_id] || '—'} · </>
+              )}
               {new Date(req.created_at).toLocaleString('pt-BR')}
             </div>
 
             {souAdmin && req.status === 'pendente' && (
               <div className="req-acoes">
-                <button className="botao botao-primario" onClick={() => decidir(req, true)}>Aprovar</button>
-                <button className="botao botao-fantasma" onClick={() => decidir(req, false)}>Rejeitar</button>
+                <button className="botao botao-primario" onClick={() => chamar('aprovar_requisicao', { p_id: req.id })}>
+                  Aprovar
+                </button>
+                <button className="botao botao-fantasma" onClick={() => chamar('rejeitar_requisicao', { p_id: req.id })}>
+                  Rejeitar
+                </button>
+              </div>
+            )}
+
+            {emAberto && (
+              <div className="req-acoes">
+                <button className="botao botao-primario" onClick={() => chamar('registrar_devolucao', { p_id: req.id })}>
+                  Registrar devolução
+                </button>
+              </div>
+            )}
+
+            {souAdmin && podeExcluir(req) && (
+              <div className="req-acoes">
+                <button className="botao botao-fantasma" onClick={() => excluir(req)}>
+                  Excluir do histórico
+                </button>
               </div>
             )}
           </div>

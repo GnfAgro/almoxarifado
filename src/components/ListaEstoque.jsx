@@ -8,12 +8,13 @@ export default function ListaEstoque({
   mapaCategorias,
   mapaTipos,
   mapaFuncoes,
-  podeVerOculto,
   renderAcoes,
 }) {
   const [busca, setBusca] = useState('')
   const [categoriaId, setCategoriaId] = useState('')
   const [tipoId, setTipoId] = useState('')
+
+  const tiposVisiveis = categoriaId ? tipos.filter((t) => t.categoria_id === categoriaId) : tipos
 
   const filtrados = useMemo(() => {
     const termo = busca.trim().toLowerCase()
@@ -37,7 +38,10 @@ export default function ListaEstoque({
         onChange={(e) => setBusca(e.target.value)}
       />
       <div className="filtros">
-        <select value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)}>
+        <select
+          value={categoriaId}
+          onChange={(e) => { setCategoriaId(e.target.value); setTipoId('') }}
+        >
           <option value="">Todas categorias</option>
           {categorias.map((c) => (
             <option key={c.id} value={c.id}>{c.nome}</option>
@@ -45,8 +49,10 @@ export default function ListaEstoque({
         </select>
         <select value={tipoId} onChange={(e) => setTipoId(e.target.value)}>
           <option value="">Todos tipos</option>
-          {tipos.map((t) => (
-            <option key={t.id} value={t.id}>{t.nome}</option>
+          {tiposVisiveis.map((t) => (
+            <option key={t.id} value={t.id}>
+              {categoriaId ? t.nome : `${mapaCategorias[t.categoria_id]} › ${t.nome}`}
+            </option>
           ))}
         </select>
       </div>
@@ -60,7 +66,6 @@ export default function ListaEstoque({
           categoriaNome={mapaCategorias[item.categoria_id]}
           tipoNome={mapaTipos[item.tipo_id]}
           funcaoNome={item.funcao_id ? mapaFuncoes[item.funcao_id] : null}
-          podeVerOculto={podeVerOculto}
           acoes={renderAcoes ? renderAcoes(item) : null}
         />
       ))}
